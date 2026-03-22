@@ -8,31 +8,6 @@
 
 您可以使用本地或多账户的CLI方式，通过任何与 OpenAI（包括Responses）/Gemini/Claude 兼容的客户端和SDK进行访问。
 
-## 赞助商
-
-[![bigmodel.cn](https://assets.router-for.me/chinese-5-0.jpg)](https://www.bigmodel.cn/claude-code?ic=RRVJPB5SII)
-
-本项目由 Z智谱 提供赞助, 他们通过 GLM CODING PLAN 对本项目提供技术支持。
-
-GLM CODING PLAN 是专为AI编码打造的订阅套餐，每月最低仅需20元，即可在十余款主流AI编码工具如 Claude Code、Cline、Roo Code 中畅享智谱旗舰模型GLM-4.7（受限于算力，目前仅限Pro用户开放），为开发者提供顶尖的编码体验。
-
-智谱AI为本产品提供了特别优惠，使用以下链接购买可以享受九折优惠：https://www.bigmodel.cn/claude-code?ic=RRVJPB5SII
-
----
-
-<table>
-<tbody>
-<tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=cliproxyapi"><img src="./assets/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>感谢 PackyCode 对本项目的赞助！PackyCode 是一家可靠高效的 API 中转服务商，提供 Claude Code、Codex、Gemini 等多种服务的中转。PackyCode 为本软件用户提供了特别优惠：使用<a href="https://www.packyapi.com/register?aff=cliproxyapi">此链接</a>注册，并在充值时输入 "cliproxyapi" 优惠码即可享受九折优惠。</td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.aicodemirror.com/register?invitecode=TJNAIF"><img src="./assets/aicodemirror.png" alt="AICodeMirror" width="150"></a></td>
-<td>感谢 AICodeMirror 赞助了本项目！AICodeMirror 提供 Claude Code / Codex / Gemini CLI 官方高稳定中转服务，支持企业级高并发、极速开票、7×24 专属技术支持。 Claude Code / Codex / Gemini 官方渠道低至 3.8 / 0.2 / 0.9 折，充值更有折上折！AICodeMirror 为 CLIProxyAPI 的用户提供了特别福利，通过<a href="https://www.aicodemirror.com/register?invitecode=TJNAIF">此链接</a>注册的用户，可享受首充8折，企业客户最高可享 7.5 折！</td>
-</tr>
-</tbody>
-</table>
-
 
 ## 功能特性
 
@@ -59,6 +34,47 @@ GLM CODING PLAN 是专为AI编码打造的订阅套餐，每月最低仅需20元
 ## 新手入门
 
 CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-for.me/cn/)
+
+### 当前仓库的修改说明
+
+- 已移除 README 中的赞助/宣传内容
+- 已将 GitHub Actions 的镜像发布目标从 Docker Hub 改为 GHCR
+- 已将 `docker-compose.yml` 默认镜像改为 `ghcr.io/ai-auto-register/cliproxyapi:latest`
+- 已将 SQLite 默认路径调整到项目根目录（`auth.db` 和 `auths/`）
+- 已补充 SQLite 存储使用说明，并为 Docker Compose 增加持久化
+- 已在 README 中补充 GHCR 镜像使用说明
+
+### 容器镜像
+
+官方容器镜像现已发布到 GHCR：
+
+- `ghcr.io/ai-auto-register/cliproxyapi:latest`
+- `ghcr.io/ai-auto-register/cliproxyapi:<tag>`
+
+拉取最新镜像：
+
+```bash
+docker pull ghcr.io/ai-auto-register/cliproxyapi:latest
+```
+
+仓库内置的 `docker-compose.yml` 也已默认使用 GHCR 镜像；如有需要，仍可通过 `CLI_PROXY_IMAGE` 环境变量覆盖。
+
+### SQLite 存储
+
+当前仓库在未配置 Postgres、Git Store、Object Store 时，默认使用 SQLite 作为认证存储。
+
+- 默认数据库路径：`auth.db`
+- 可通过环境变量覆盖：`SQLITESTORE_PATH`
+- 首次启动时，会从配置中的 `auth-dir`，或配置文件同级的 `./auths` 导入旧的认证 JSON 文件
+- 运行时镜像认证文件会写入 `auths/`
+
+示例：
+
+```bash
+SQLITESTORE_PATH=./auth.db ./CLIProxyAPI -config ./config.yaml
+```
+
+如果使用 Docker Compose，请保留 `./auth.db` 和 `./auths` 挂载，这样 SQLite 数据库和镜像认证文件才能在容器重启后继续保留。
 
 ## 管理 API 文档
 

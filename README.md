@@ -8,31 +8,6 @@ It now also supports OpenAI Codex (GPT models) and Claude Code via OAuth.
 
 So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
-## Sponsor
-
-[![z.ai](https://assets.router-for.me/english-5-0.jpg)](https://z.ai/subscribe?ic=8JVLJQFSKB)
-
-This project is sponsored by Z.ai, supporting us with their GLM CODING PLAN.
-
-GLM CODING PLAN is a subscription service designed for AI coding, starting at just $10/month. It provides access to their flagship GLM-4.7 & （GLM-5 Only Available  for Pro Users）model across 10+ popular AI coding tools (Claude Code, Cline, Roo Code, etc.), offering developers top-tier, fast, and stable coding experiences.
-
-Get 10% OFF GLM CODING PLAN：https://z.ai/subscribe?ic=8JVLJQFSKB
-
----
-
-<table>
-<tbody>
-<tr>
-<td width="180"><a href="https://www.packyapi.com/register?aff=cliproxyapi"><img src="./assets/packycode.png" alt="PackyCode" width="150"></a></td>
-<td>Thanks to PackyCode for sponsoring this project! PackyCode is a reliable and efficient API relay service provider, offering relay services for Claude Code, Codex, Gemini, and more. PackyCode provides special discounts for our software users: register using <a href="https://www.packyapi.com/register?aff=cliproxyapi">this link</a> and enter the "cliproxyapi" promo code during recharge to get 10% off.</td>
-</tr>
-<tr>
-<td width="180"><a href="https://www.aicodemirror.com/register?invitecode=TJNAIF"><img src="./assets/aicodemirror.png" alt="AICodeMirror" width="150"></a></td>
-<td>Thanks to AICodeMirror for sponsoring this project! AICodeMirror provides official high-stability relay services for Claude Code / Codex / Gemini CLI, with enterprise-grade concurrency, fast invoicing, and 24/7 dedicated technical support. Claude Code / Codex / Gemini official channels at 38% / 2% / 9% of original price, with extra discounts on top-ups! AICodeMirror offers special benefits for CLIProxyAPI users: register via <a href="https://www.aicodemirror.com/register?invitecode=TJNAIF">this link</a> to enjoy 20% off your first top-up, and enterprise customers can get up to 25% off!</td>
-</tr>
-</tbody>
-</table>
-
 ## Overview
 
 - OpenAI/Gemini/Claude compatible API endpoints for CLI models
@@ -59,6 +34,47 @@ Get 10% OFF GLM CODING PLAN：https://z.ai/subscribe?ic=8JVLJQFSKB
 ## Getting Started
 
 CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
+
+### Changes in This Repository
+
+- Removed sponsor/promotional content from the README files
+- Updated GitHub Actions to publish container images to GHCR instead of Docker Hub
+- Changed the default image in `docker-compose.yml` to `ghcr.io/ai-auto-register/cliproxyapi:latest`
+- Changed SQLite defaults to use the project root (`auth.db` and `auths/`)
+- Added SQLite storage usage notes and Docker Compose persistence
+- Added GHCR image usage notes to the README files
+
+### Container Image
+
+Official container images are published to GHCR:
+
+- `ghcr.io/ai-auto-register/cliproxyapi:latest`
+- `ghcr.io/ai-auto-register/cliproxyapi:<tag>`
+
+Pull the latest image:
+
+```bash
+docker pull ghcr.io/ai-auto-register/cliproxyapi:latest
+```
+
+The included `docker-compose.yml` now uses the GHCR image by default. You can still override it with the `CLI_PROXY_IMAGE` environment variable when needed.
+
+### SQLite Storage
+
+This repository now uses SQLite as the default auth store when Postgres, Git store, and object store are not configured.
+
+- Default database path: `auth.db`
+- Optional override: `SQLITESTORE_PATH`
+- On first startup, legacy auth JSON files are imported from `auth-dir` in the config, or from `./auths` next to the config file
+- Runtime auth mirror files are written to `auths/`
+
+Example:
+
+```bash
+SQLITESTORE_PATH=./auth.db ./CLIProxyAPI -config ./config.yaml
+```
+
+When using Docker Compose, keep `./auth.db` and `./auths` mounted so that the SQLite database and mirrored auth files persist across container restarts.
 
 ## Management API
 

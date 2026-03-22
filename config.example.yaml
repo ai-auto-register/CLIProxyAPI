@@ -31,6 +31,13 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
+# SQLite auth storage
+# When no Postgres / Git / Object store is configured, the server uses SQLite by default.
+# Default database path: ./auth.db (or $WRITABLE_PATH/auth.db when WRITABLE_PATH is set)
+# You can override it with the SQLITESTORE_PATH environment variable.
+# Runtime auth mirror files are written to auth-dir. On first startup, existing auth JSON files
+# in auth-dir can be imported into SQLite automatically.
+
 # API keys for authentication
 api-keys:
   - "your-api-key-1"

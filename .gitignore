@@ -24,6 +24,9 @@ static/*
 # Authentication data
 auths/*
 !auths/.gitkeep
+auth.db
+auth.db-shm
+auth.db-wal
 
 # Documentation
 docs/*
