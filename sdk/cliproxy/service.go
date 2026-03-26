@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/authcleaner"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor"
 	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
@@ -89,6 +90,17 @@ type Service struct {
 
 	// wsGateway manages websocket Gemini providers.
 	wsGateway *wsrelay.Manager
+
+	// authCleaner optionally runs an in-process cleanup loop against runtime auth state.
+	authCleaner *AuthCleanerRuntime
+}
+
+// AuthCleanerRuntime configures the in-process 401 auth cleaner.
+type AuthCleanerRuntime struct {
+	Enabled  bool
+	DryRun   bool
+	Once     bool
+	Interval time.Duration
 }
 
 // RegisterUsagePlugin registers a usage plugin on the global usage manager.
@@ -686,6 +698,19 @@ func (s *Service) Run(ctx context.Context) error {
 		interval := 15 * time.Minute
 		s.coreManager.StartAutoRefresh(context.Background(), interval)
 		log.Infof("core auth auto-refresh started (interval=%s)", interval)
+	}
+
+	if s.authCleaner != nil && s.authCleaner.Enabled {
+		cleaner := authcleaner.New(s.coreManager, sdkAuth.GetTokenStore())
+		go func(runtime AuthCleanerRuntime) {
+			if errCleaner := cleaner.RunLoop(ctx, authcleaner.Options{
+				DryRun:   runtime.DryRun,
+				Once:     runtime.Once,
+				Interval: runtime.Interval,
+			}); errCleaner != nil && !errors.Is(errCleaner, context.Canceled) {
+				log.Errorf("auth cleaner exited with error: %v", errCleaner)
+			}
+		}(*s.authCleaner)
 	}
 
 	select {

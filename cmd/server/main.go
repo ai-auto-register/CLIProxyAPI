@@ -31,6 +31,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
@@ -68,6 +69,10 @@ func main() {
 	var oauthCallbackPort int
 	var antigravityLogin bool
 	var kimiLogin bool
+	var clean401 bool
+	var clean401DryRun bool
+	var clean401Once bool
+	var clean401Interval time.Duration
 	var projectID string
 	var vertexImport string
 	var configPath string
@@ -88,6 +93,10 @@ func main() {
 	flag.IntVar(&oauthCallbackPort, "oauth-callback-port", 0, "Override OAuth callback port (defaults to provider-specific port)")
 	flag.BoolVar(&antigravityLogin, "antigravity-login", false, "Login to Antigravity using OAuth")
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
+	flag.BoolVar(&clean401, "clean-401", false, "Run in-process cleanup for auth files classified as 401/unauthorized")
+	flag.BoolVar(&clean401DryRun, "clean-401-dry-run", false, "Preview in-process 401 auth cleanup without deleting files")
+	flag.BoolVar(&clean401Once, "clean-401-once", false, "Run in-process 401 auth cleanup once after startup")
+	flag.DurationVar(&clean401Interval, "clean-401-interval", time.Minute, "Loop interval for in-process 401 auth cleanup")
 	flag.StringVar(&projectID, "project_id", "", "Project ID (Gemini only, not required)")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
@@ -531,6 +540,32 @@ func main() {
 
 	// Handle different command modes based on the provided flags.
 
+	authCleanerRuntime := (*cliproxy.AuthCleanerRuntime)(nil)
+	if cfg.AuthCleaner.Enable || clean401 {
+		interval := time.Duration(cfg.AuthCleaner.IntervalSeconds) * time.Second
+		if interval <= 0 {
+			interval = time.Minute
+		}
+		authCleanerRuntime = &cliproxy.AuthCleanerRuntime{
+			Enabled:  true,
+			DryRun:   cfg.AuthCleaner.DryRun,
+			Once:     cfg.AuthCleaner.Once,
+			Interval: interval,
+		}
+		if clean401 {
+			authCleanerRuntime.Enabled = true
+		}
+		if clean401DryRun {
+			authCleanerRuntime.DryRun = true
+		}
+		if clean401Once {
+			authCleanerRuntime.Once = true
+		}
+		if clean401Interval > 0 {
+			authCleanerRuntime.Interval = clean401Interval
+		}
+	}
+
 	if vertexImport != "" {
 		// Handle Vertex service account import
 		cmd.DoVertexImport(cfg, vertexImport)
@@ -603,7 +638,7 @@ func main() {
 					password = localMgmtPassword
 				}
 
-				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password)
+				cancel, done := cmd.StartServiceBackgroundWithOptions(cfg, configFilePath, password, authCleanerRuntime)
 
 				client := tui.NewClient(cfg.Port, password)
 				ready := false
@@ -649,7 +684,7 @@ func main() {
 			if !localModel {
 				registry.StartModelsUpdater(context.Background())
 			}
-			cmd.StartService(cfg, configFilePath, password)
+			cmd.StartServiceWithOptions(cfg, configFilePath, password, authCleanerRuntime)
 		}
 	}
 }

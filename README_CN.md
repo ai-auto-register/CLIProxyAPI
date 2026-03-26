@@ -80,6 +80,32 @@ SQLITESTORE_PATH=./auth.db ./CLIProxyAPI -config ./config.yaml
 
 请参见 [MANAGEMENT_API_CN.md](https://help.router-for.me/cn/management/api)
 
+### 401 认证清理器
+
+内置的进程内清理器会直接读取运行中的 runtime auth manager，只删除当前被判定为 401 / unauthorized 的认证文件：
+
+```bash
+./CLIProxyAPI -clean-401 -clean-401-dry-run -clean-401-once
+```
+
+- `-clean-401-dry-run`：仅预览，不实际删除
+- `-clean-401-once`：服务启动后只执行一次清理
+- `-clean-401-interval`：未设置 `-clean-401-once` 时的循环检测间隔
+
+每次实际删除前都会先把认证文件备份到 `backups/cliproxyapi-auth-cleaner/<run-id>/`，并把执行报告写入 `reports/cliproxyapi-auth-cleaner/`。
+
+也可以直接在 `config.yaml` 中启用：
+
+```yaml
+auth-cleaner:
+  enable: true
+  dry-run: false
+  once: false
+  interval-seconds: 60
+```
+
+如果同时提供 CLI 参数，则以 CLI 参数为准喵。
+
 ## Amp CLI 支持
 
 CLIProxyAPI 已内置对 [Amp CLI](https://ampcode.com) 和 Amp IDE 扩展的支持，可让你使用自己的 Google/ChatGPT/Claude OAuth 订阅来配合 Amp 编码工具：

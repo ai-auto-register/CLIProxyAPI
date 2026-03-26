@@ -99,6 +99,14 @@ quota-exceeded:
 routing:
   strategy: "round-robin" # round-robin (default), fill-first
 
+# In-process runtime auth cleaner (only deletes auths currently classified as 401/unauthorized).
+# It reads the running core auth manager directly and does not require the Management API.
+auth-cleaner:
+  enable: false
+  dry-run: false
+  once: false
+  interval-seconds: 60
+
 # When true, enable authentication for the WebSocket API (/v1/ws).
 ws-auth: false
 

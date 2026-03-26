@@ -80,6 +80,32 @@ When using Docker Compose, keep `./auth.db` and `./auths` mounted so that the SQ
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
 
+### 401 Auth Cleaner
+
+You can run the built-in in-process cleaner to remove only auth files that are currently classified as 401 / unauthorized by the runtime auth manager:
+
+```bash
+./CLIProxyAPI -clean-401 -clean-401-dry-run -clean-401-once
+```
+
+- `-clean-401-dry-run`: preview only, no deletion
+- `-clean-401-once`: run once after startup and keep serving normally
+- `-clean-401-interval`: loop interval when `-clean-401-once` is not set
+
+The cleaner will back up each deleted auth JSON into `backups/cliproxyapi-auth-cleaner/<run-id>/` and write a report to `reports/cliproxyapi-auth-cleaner/`.
+
+You can also enable it from `config.yaml`:
+
+```yaml
+auth-cleaner:
+  enable: true
+  dry-run: false
+  once: false
+  interval-seconds: 60
+```
+
+CLI flags still override the config values when provided.
+
 ## Amp CLI Support
 
 CLIProxyAPI includes integrated support for [Amp CLI](https://ampcode.com) and Amp IDE extensions, enabling you to use your Google/ChatGPT/Claude OAuth subscriptions with Amp's coding tools:

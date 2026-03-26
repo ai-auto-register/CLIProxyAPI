@@ -82,6 +82,9 @@ type Config struct {
 	// Routing controls credential selection behavior.
 	Routing RoutingConfig `yaml:"routing" json:"routing"`
 
+	// AuthCleaner controls the in-process runtime 401 auth cleaner.
+	AuthCleaner AuthCleanerConfig `yaml:"auth-cleaner" json:"auth-cleaner"`
+
 	// WebsocketAuth enables or disables authentication for the WebSocket API.
 	WebsocketAuth bool `yaml:"ws-auth" json:"ws-auth"`
 
@@ -198,6 +201,18 @@ type RoutingConfig struct {
 	// Strategy selects the credential selection strategy.
 	// Supported values: "round-robin" (default), "fill-first".
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+}
+
+// AuthCleanerConfig controls the in-process runtime auth cleaner.
+type AuthCleanerConfig struct {
+	// Enable toggles the in-process 401 auth cleaner.
+	Enable bool `yaml:"enable" json:"enable"`
+	// DryRun previews cleanup without deleting files.
+	DryRun bool `yaml:"dry-run,omitempty" json:"dry-run,omitempty"`
+	// Once runs one cleanup pass after startup instead of looping.
+	Once bool `yaml:"once,omitempty" json:"once,omitempty"`
+	// IntervalSeconds is the loop interval in seconds when Once is false.
+	IntervalSeconds int `yaml:"interval-seconds,omitempty" json:"interval-seconds,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.
