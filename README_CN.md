@@ -115,6 +115,14 @@ CLIProxyAPI 已内置对 [Amp CLI](https://ampcode.com) 和 Amp IDE 扩展的支
 - 智能模型回退与自动路由
 - 以安全为先的设计，管理端点仅限 localhost
 
+当你需要某一类后端的请求/响应协议形态时，优先使用 provider-specific 路径，而不是合并后的 `/v1/...` 端点：
+
+- 对于 messages 风格的后端，使用 `/api/provider/{provider}/v1/messages`。
+- 对于按模型路径暴露生成接口的后端，使用 `/api/provider/{provider}/v1beta/models/...`。
+- 对于 chat-completions 风格的后端，使用 `/api/provider/{provider}/v1/chat/completions`。
+
+这些路径有助于选择协议表面，但当多个后端复用同一个客户端可见模型名时，它们本身并不能保证唯一的推理执行器。实际的推理路由仍然根据请求里的 model/alias 解析。若要严格钉住某个后端，请使用唯一 alias、前缀，或避免让多个后端暴露相同的客户端模型名。
+
 **→ [Amp CLI 完整集成指南](https://help.router-for.me/cn/agent-client/amp-cli.html)**
 
 ## SDK 文档
@@ -150,10 +158,6 @@ CLIProxyAPI 已内置对 [Amp CLI](https://ampcode.com) 和 Amp IDE 扩展的支
 ### [CCS (Claude Code Switch)](https://github.com/kaitranntt/ccs)
 
 CLI 封装器，用于通过 CLIProxyAPI OAuth 即时切换多个 Claude 账户和替代模型（Gemini, Codex, Antigravity），无需 API 密钥。
-
-### [ProxyPal](https://github.com/heyhuynhgiabuu/proxypal)
-
-基于 macOS 平台的原生 CLIProxyAPI GUI：配置供应商、模型映射以及OAuth端点，无需 API 密钥。
 
 ### [Quotio](https://github.com/nguyenphutrong/quotio)
 
@@ -199,6 +203,10 @@ Windows 托盘应用，基于 PowerShell 脚本实现，不依赖任何第三方
 
 Shadow AI 是一款专为受限环境设计的 AI 辅助工具。提供无窗口、无痕迹的隐蔽运行方式，并通过局域网实现跨设备的 AI 问答交互与控制。本质上是一个「屏幕/音频采集 + AI 推理 + 低摩擦投送」的自动化协作层，帮助用户在受控设备/受限环境下沉浸式跨应用地使用 AI 助手。
 
+### [ProxyPal](https://github.com/buddingnewinsights/proxypal)
+
+跨平台桌面应用（macOS、Windows、Linux），以原生 GUI 封装 CLIProxyAPI。支持连接 Claude、ChatGPT、Gemini、GitHub Copilot、Qwen、iFlow 及自定义 OpenAI 兼容端点，具备使用分析、请求监控和热门编程工具自动配置功能，无需 API 密钥。
+
 > [!NOTE]  
 > 如果你开发了基于 CLIProxyAPI 的项目，请提交一个 PR（拉取请求）将其添加到此列表中。
 
@@ -225,7 +233,7 @@ OmniRoute 是一个面向多供应商大语言模型的 AI 网关：它提供兼
 
 ## 写给所有中国网友的
 
-QQ 群：188637136
+QQ 群：188637136（满）、1081218164
 
 或
 
