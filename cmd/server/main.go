@@ -140,6 +140,9 @@ func main() {
 		pgStoreSchema        string
 		pgStoreLocalPath     string
 		pgStoreInst          *store.PostgresStore
+		useSQLiteStore       bool
+		sqliteStorePath      string
+		sqliteStoreInst      *store.SQLiteStore
 		useGitStore          bool
 		gitStoreRemoteURL    string
 		gitStoreUser         string
@@ -239,6 +242,23 @@ func main() {
 	}
 	if value, ok := lookupEnv("OBJECTSTORE_LOCAL_PATH", "objectstore_local_path"); ok {
 		objectStoreLocalPath = value
+	}
+	if value, ok := lookupEnv("SQLITESTORE_PATH", "sqlitestore_path", "sqlite_store_path"); ok {
+		useSQLiteStore = true
+		sqliteStorePath = value
+	}
+	if useSQLiteStore || (!usePostgresStore && !useObjectStore && !useGitStore) {
+		useSQLiteStore = true
+		usePostgresStore = false
+		useObjectStore = false
+		useGitStore = false
+		if strings.TrimSpace(sqliteStorePath) == "" {
+			sqliteBase := writableBase
+			if sqliteBase == "" {
+				sqliteBase = wd
+			}
+			sqliteStorePath = filepath.Join(sqliteBase, "auth.db")
+		}
 	}
 
 	// Check for cloud deploy mode only on first execution
@@ -440,6 +460,55 @@ func main() {
 			cfg.AuthDir = gitStoreInst.AuthDir()
 			log.Infof("git-backed token store enabled, repository path: %s", gitStoreRoot)
 		}
+	} else if useSQLiteStore {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		sqliteStoreInst, err = store.NewSQLiteStore(ctx, sqliteStorePath)
+		cancel()
+		if err != nil {
+			log.Errorf("failed to initialize sqlite token store: %v", err)
+			return
+		}
+
+		configFilePath = configPath
+		if strings.TrimSpace(configFilePath) == "" {
+			configFilePath = filepath.Join(wd, "config.yaml")
+		}
+		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
+		if err != nil {
+			log.Errorf("failed to load config: %v", err)
+			return
+		}
+		if cfg == nil {
+			cfg = &config.Config{}
+		}
+
+		var importAuthDir string
+		if strings.TrimSpace(cfg.AuthDir) != "" {
+			if filepath.IsAbs(cfg.AuthDir) {
+				importAuthDir = filepath.Clean(cfg.AuthDir)
+			} else if strings.HasPrefix(cfg.AuthDir, "~") {
+				importAuthDir = cfg.AuthDir
+			} else {
+				importAuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), cfg.AuthDir))
+			}
+		} else {
+			importAuthDir = filepath.Join(filepath.Dir(configFilePath), "auths")
+		}
+		if resolvedImportAuthDir, errResolve := util.ResolveAuthDir(importAuthDir); errResolve == nil && strings.TrimSpace(resolvedImportAuthDir) != "" {
+			importAuthDir = resolvedImportAuthDir
+		}
+
+		cfg.AuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), "auths"))
+		sqliteStoreInst.SetBaseDir(cfg.AuthDir)
+
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		if err = sqliteStoreInst.BootstrapFrom(ctx, importAuthDir); err != nil {
+			cancel()
+			log.Errorf("failed to bootstrap sqlite token store: %v", err)
+			return
+		}
+		cancel()
+		log.Infof("sqlite-backed token store enabled, database path: %s", sqliteStoreInst.DBPath())
 	} else if configPath != "" {
 		configFilePath = configPath
 		cfg, err = config.LoadConfigOptional(configPath, isCloudDeploy)
@@ -515,6 +584,8 @@ func main() {
 	// Register the shared token store once so all components use the same persistence backend.
 	if usePostgresStore {
 		sdkAuth.RegisterTokenStore(pgStoreInst)
+	} else if useSQLiteStore {
+		sdkAuth.RegisterTokenStore(sqliteStoreInst)
 	} else if useObjectStore {
 		sdkAuth.RegisterTokenStore(objectStoreInst)
 	} else if useGitStore {
