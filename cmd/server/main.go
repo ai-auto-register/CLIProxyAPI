@@ -17,22 +17,22 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	configaccess "github.com/router-for-me/CLIProxyAPI/v6/internal/access/config_access"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/buildinfo"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/cmd"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/store"
-	_ "github.com/router-for-me/CLIProxyAPI/v6/internal/translator"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/tui"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	configaccess "github.com/router-for-me/CLIProxyAPI/v7/internal/access/config_access"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/buildinfo"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/cmd"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/home"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/logging"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/managementasset"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/misc"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/redisqueue"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/registry"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/store"
+	_ "github.com/router-for-me/CLIProxyAPI/v7/internal/translator"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/tui"
+	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
+	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -66,15 +66,14 @@ func main() {
 	var oauthCallbackPort int
 	var antigravityLogin bool
 	var kimiLogin bool
-	var clean401 bool
-	var clean401DryRun bool
-	var clean401Once bool
-	var clean401Interval time.Duration
+	var xaiLogin bool
 	var projectID string
 	var vertexImport string
 	var vertexImportPrefix string
 	var configPath string
 	var password string
+	var homeJWT string
+	var homeDisableClusterDiscovery bool
 	var tuiMode bool
 	var standalone bool
 	var localModel bool
@@ -88,15 +87,14 @@ func main() {
 	flag.IntVar(&oauthCallbackPort, "oauth-callback-port", 0, "Override OAuth callback port (defaults to provider-specific port)")
 	flag.BoolVar(&antigravityLogin, "antigravity-login", false, "Login to Antigravity using OAuth")
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
-	flag.BoolVar(&clean401, "clean-401", false, "Run in-process cleanup for auth files classified as 401/unauthorized")
-	flag.BoolVar(&clean401DryRun, "clean-401-dry-run", false, "Preview in-process 401 auth cleanup without deleting files")
-	flag.BoolVar(&clean401Once, "clean-401-once", false, "Run in-process 401 auth cleanup once after startup")
-	flag.DurationVar(&clean401Interval, "clean-401-interval", time.Minute, "Loop interval for in-process 401 auth cleanup")
+	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
 	flag.StringVar(&projectID, "project_id", "", "Project ID (Gemini only, not required)")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
 	flag.StringVar(&vertexImportPrefix, "vertex-import-prefix", "", "Prefix for Vertex model namespacing (use with -vertex-import)")
 	flag.StringVar(&password, "password", "", "")
+	flag.StringVar(&homeJWT, "home-jwt", "", "Home control plane JWT for mTLS certificate bootstrap and connection")
+	flag.BoolVar(&homeDisableClusterDiscovery, "home-disable-cluster-discovery", false, "Disable Home CLUSTER NODES discovery and keep using the configured -home-jwt address")
 	flag.BoolVar(&tuiMode, "tui", false, "Start with terminal management UI")
 	flag.BoolVar(&standalone, "standalone", false, "In TUI mode, start an embedded local server")
 	flag.BoolVar(&localModel, "local-model", false, "Use embedded model catalog only, skip remote model fetching")
@@ -135,15 +133,13 @@ func main() {
 	var err error
 	var cfg *config.Config
 	var isCloudDeploy bool
+	var configLoadedFromHome bool
 	var (
 		usePostgresStore     bool
 		pgStoreDSN           string
 		pgStoreSchema        string
 		pgStoreLocalPath     string
 		pgStoreInst          *store.PostgresStore
-		useSQLiteStore       bool
-		sqliteStorePath      string
-		sqliteStoreInst      *store.SQLiteStore
 		useGitStore          bool
 		gitStoreRemoteURL    string
 		gitStoreUser         string
@@ -185,6 +181,13 @@ func main() {
 		return "", false
 	}
 	writableBase := util.WritablePath()
+
+	if strings.TrimSpace(homeJWT) == "" {
+		if v, ok := lookupEnv("HOME_JWT", "home_jwt"); ok {
+			homeJWT = v
+		}
+	}
+
 	if value, ok := lookupEnv("PGSTORE_DSN", "pgstore_dsn"); ok {
 		usePostgresStore = true
 		pgStoreDSN = value
@@ -204,10 +207,6 @@ func main() {
 			}
 		}
 		useGitStore = false
-	}
-	if value, ok := lookupEnv("SQLITESTORE_PATH", "sqlitestore_path", "sqlite_store_path"); ok {
-		useSQLiteStore = true
-		sqliteStorePath = value
 	}
 	if value, ok := lookupEnv("GITSTORE_GIT_URL", "gitstore_git_url"); ok {
 		useGitStore = true
@@ -241,19 +240,6 @@ func main() {
 	if value, ok := lookupEnv("OBJECTSTORE_LOCAL_PATH", "objectstore_local_path"); ok {
 		objectStoreLocalPath = value
 	}
-	if useSQLiteStore || (!usePostgresStore && !useObjectStore && !useGitStore) {
-		useSQLiteStore = true
-		usePostgresStore = false
-		useObjectStore = false
-		useGitStore = false
-		if strings.TrimSpace(sqliteStorePath) == "" {
-			sqliteBase := writableBase
-			if sqliteBase == "" {
-				sqliteBase = wd
-			}
-			sqliteStorePath = filepath.Join(sqliteBase, "auth.db")
-		}
-	}
 
 	// Check for cloud deploy mode only on first execution
 	// Read env var name in uppercase: DEPLOY
@@ -265,7 +251,55 @@ func main() {
 	// Determine and load the configuration file.
 	// Prefer the Postgres store when configured, otherwise fallback to git or local files.
 	var configFilePath string
-	if usePostgresStore {
+	if strings.TrimSpace(homeJWT) != "" {
+		configLoadedFromHome = true
+		ctxHome, cancelHome := context.WithTimeout(context.Background(), 30*time.Second)
+		homeCfg, errHomeCfg := home.ConfigFromJWT(ctxHome, homeJWT)
+		cancelHome()
+		if errHomeCfg != nil {
+			log.Errorf("invalid -home-jwt: %v", errHomeCfg)
+			return
+		}
+		if homeDisableClusterDiscovery {
+			homeCfg.DisableClusterDiscovery = true
+		}
+		homeClient := home.New(homeCfg)
+		defer homeClient.Close()
+
+		ctxHomeConfig, cancelHomeConfig := context.WithTimeout(context.Background(), 30*time.Second)
+		raw, errGetConfig := homeClient.GetConfig(ctxHomeConfig)
+		cancelHomeConfig()
+		if errGetConfig != nil {
+			log.Errorf("failed to fetch config from home: %v", errGetConfig)
+			return
+		}
+
+		parsed, errParseConfig := config.ParseConfigBytes(raw)
+		if errParseConfig != nil {
+			log.Errorf("failed to parse config payload from home: %v", errParseConfig)
+			return
+		}
+		if parsed == nil {
+			parsed = &config.Config{}
+		}
+		parsed.Home = homeCfg
+		parsed.Port = 8317 // Default to 8317 for home mode, can be overridden by home config
+		parsed.UsageStatisticsEnabled = true
+		cfg = parsed
+
+		// Keep a non-empty config path for downstream components (log paths, management assets, etc),
+		// but do not require the file to exist when loading config from home.
+		if strings.TrimSpace(configPath) != "" {
+			configFilePath = configPath
+		} else {
+			configFilePath = filepath.Join(wd, "config.yaml")
+		}
+
+		// Local stores are intentionally disabled when config is loaded from home.
+		usePostgresStore = false
+		useObjectStore = false
+		useGitStore = false
+	} else if usePostgresStore {
 		if pgStoreLocalPath == "" {
 			pgStoreLocalPath = wd
 		}
@@ -295,55 +329,6 @@ func main() {
 			cfg.AuthDir = pgStoreInst.AuthDir()
 			log.Infof("postgres-backed token store enabled, workspace path: %s", pgStoreInst.WorkDir())
 		}
-	} else if useSQLiteStore {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		sqliteStoreInst, err = store.NewSQLiteStore(ctx, sqliteStorePath)
-		cancel()
-		if err != nil {
-			log.Errorf("failed to initialize sqlite token store: %v", err)
-			return
-		}
-
-		configFilePath = configPath
-		if strings.TrimSpace(configFilePath) == "" {
-			configFilePath = filepath.Join(wd, "config.yaml")
-		}
-		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
-		if err != nil {
-			log.Errorf("failed to load config: %v", err)
-			return
-		}
-		if cfg == nil {
-			cfg = &config.Config{}
-		}
-
-		var importAuthDir string
-		if strings.TrimSpace(cfg.AuthDir) != "" {
-			if filepath.IsAbs(cfg.AuthDir) {
-				importAuthDir = filepath.Clean(cfg.AuthDir)
-			} else if strings.HasPrefix(cfg.AuthDir, "~") {
-				importAuthDir = cfg.AuthDir
-			} else {
-				importAuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), cfg.AuthDir))
-			}
-		} else {
-			importAuthDir = filepath.Join(filepath.Dir(configFilePath), "auths")
-		}
-		if resolvedImportAuthDir, errResolve := util.ResolveAuthDir(importAuthDir); errResolve == nil && strings.TrimSpace(resolvedImportAuthDir) != "" {
-			importAuthDir = resolvedImportAuthDir
-		}
-
-		cfg.AuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), "auths"))
-		sqliteStoreInst.SetBaseDir(cfg.AuthDir)
-
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-		if err = sqliteStoreInst.BootstrapFrom(ctx, importAuthDir); err != nil {
-			cancel()
-			log.Errorf("failed to bootstrap sqlite token store: %v", err)
-			return
-		}
-		cancel()
-		log.Infof("sqlite-backed token store enabled, database path: %s", sqliteStoreInst.DBPath())
 	} else if useObjectStore {
 		if objectStoreLocalPath == "" {
 			if writableBase != "" {
@@ -478,24 +463,29 @@ func main() {
 	// In cloud deploy mode, check if we have a valid configuration
 	var configFileExists bool
 	if isCloudDeploy {
-		if info, errStat := os.Stat(configFilePath); errStat != nil {
-			// Don't mislead: API server will not start until configuration is provided.
-			log.Info("Cloud deploy mode: No configuration file detected; standing by for configuration")
-			configFileExists = false
-		} else if info.IsDir() {
-			log.Info("Cloud deploy mode: Config path is a directory; standing by for configuration")
-			configFileExists = false
-		} else if cfg.Port == 0 {
-			// LoadConfigOptional returns empty config when file is empty or invalid.
-			// Config file exists but is empty or invalid; treat as missing config
-			log.Info("Cloud deploy mode: Configuration file is empty or invalid; standing by for valid configuration")
-			configFileExists = false
+		if configLoadedFromHome && cfg != nil {
+			configFileExists = cfg.Port != 0
 		} else {
-			log.Info("Cloud deploy mode: Configuration file detected; starting service")
-			configFileExists = true
+			if info, errStat := os.Stat(configFilePath); errStat != nil {
+				// Don't mislead: API server will not start until configuration is provided.
+				log.Info("Cloud deploy mode: No configuration file detected; standing by for configuration")
+				configFileExists = false
+			} else if info.IsDir() {
+				log.Info("Cloud deploy mode: Config path is a directory; standing by for configuration")
+				configFileExists = false
+			} else if cfg.Port == 0 {
+				// LoadConfigOptional returns empty config when file is empty or invalid.
+				// Config file exists but is empty or invalid; treat as missing config
+				log.Info("Cloud deploy mode: Configuration file is empty or invalid; standing by for valid configuration")
+				configFileExists = false
+			} else {
+				log.Info("Cloud deploy mode: Configuration file detected; starting service")
+				configFileExists = true
+			}
 		}
 	}
-	usage.SetStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	redisqueue.SetUsageStatisticsEnabled(cfg.UsageStatisticsEnabled)
+	redisqueue.SetRetentionSeconds(cfg.RedisUsageQueueRetentionSeconds)
 	coreauth.SetQuotaCooldownDisabled(cfg.DisableCooling)
 
 	if err = logging.ConfigureLogOutput(cfg); err != nil {
@@ -525,8 +515,6 @@ func main() {
 	// Register the shared token store once so all components use the same persistence backend.
 	if usePostgresStore {
 		sdkAuth.RegisterTokenStore(pgStoreInst)
-	} else if useSQLiteStore {
-		sdkAuth.RegisterTokenStore(sqliteStoreInst)
 	} else if useObjectStore {
 		sdkAuth.RegisterTokenStore(objectStoreInst)
 	} else if useGitStore {
@@ -539,32 +527,6 @@ func main() {
 	configaccess.Register(&cfg.SDKConfig)
 
 	// Handle different command modes based on the provided flags.
-
-	authCleanerRuntime := (*cliproxy.AuthCleanerRuntime)(nil)
-	if cfg.AuthCleaner.Enable || clean401 {
-		interval := time.Duration(cfg.AuthCleaner.IntervalSeconds) * time.Second
-		if interval <= 0 {
-			interval = time.Minute
-		}
-		authCleanerRuntime = &cliproxy.AuthCleanerRuntime{
-			Enabled:  true,
-			DryRun:   cfg.AuthCleaner.DryRun,
-			Once:     cfg.AuthCleaner.Once,
-			Interval: interval,
-		}
-		if clean401 {
-			authCleanerRuntime.Enabled = true
-		}
-		if clean401DryRun {
-			authCleanerRuntime.DryRun = true
-		}
-		if clean401Once {
-			authCleanerRuntime.Once = true
-		}
-		if clean401Interval > 0 {
-			authCleanerRuntime.Interval = clean401Interval
-		}
-	}
 
 	if vertexImport != "" {
 		// Handle Vertex service account import
@@ -586,6 +548,8 @@ func main() {
 		cmd.DoClaudeLogin(cfg, options)
 	} else if kimiLogin {
 		cmd.DoKimiLogin(cfg, options)
+	} else if xaiLogin {
+		cmd.DoXAILogin(cfg, options)
 	} else {
 		// In cloud deploy mode without config file, just wait for shutdown signals
 		if isCloudDeploy && !configFileExists {
@@ -601,8 +565,10 @@ func main() {
 				// Standalone mode: start an embedded local server and connect TUI client to it.
 				managementasset.StartAutoUpdater(context.Background(), configFilePath)
 				misc.StartAntigravityVersionUpdater(context.Background())
-				if !localModel {
+				if !localModel && !cfg.Home.Enabled {
 					registry.StartModelsUpdater(context.Background())
+				} else if cfg.Home.Enabled {
+					log.Info("Home mode: remote model updates disabled")
 				}
 				hook := tui.NewLogHook(2000)
 				hook.SetFormatter(&logging.LogFormatter{})
@@ -633,7 +599,7 @@ func main() {
 					password = localMgmtPassword
 				}
 
-				cancel, done := cmd.StartServiceBackgroundWithOptions(cfg, configFilePath, password, authCleanerRuntime)
+				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password)
 
 				client := tui.NewClient(cfg.Port, password)
 				ready := false
@@ -677,10 +643,12 @@ func main() {
 			// Start the main proxy service
 			managementasset.StartAutoUpdater(context.Background(), configFilePath)
 			misc.StartAntigravityVersionUpdater(context.Background())
-			if !localModel {
+			if !localModel && !cfg.Home.Enabled {
 				registry.StartModelsUpdater(context.Background())
+			} else if cfg.Home.Enabled {
+				log.Info("Home mode: remote model updates disabled")
 			}
-			cmd.StartServiceWithOptions(cfg, configFilePath, password, authCleanerRuntime)
+			cmd.StartService(cfg, configFilePath, password)
 		}
 	}
 }
