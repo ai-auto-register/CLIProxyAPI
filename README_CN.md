@@ -68,78 +68,10 @@ VisionCoder 还为我们的用户提供 <a href="https://coder.visioncoder.cn" t
 
 CLIProxyAPI 用户手册： [https://help.router-for.me/](https://help.router-for.me/cn/)
 
-### 当前仓库的修改说明
-
-- 已移除 README 中的赞助/宣传内容
-- 已将 GitHub Actions 的镜像发布目标从 Docker Hub 改为 GHCR
-- 已将 `docker-compose.yml` 默认镜像改为 `ghcr.io/ai-auto-register/cliproxyapi:latest`
-- 已将 SQLite 默认路径调整到项目根目录（`auth.db` 和 `auths/`）
-- 已补充 SQLite 存储使用说明，并为 Docker Compose 增加持久化
-- 已在 README 中补充 GHCR 镜像使用说明
-
-### 容器镜像
-
-官方容器镜像现已发布到 GHCR：
-
-- `ghcr.io/ai-auto-register/cliproxyapi:latest`
-- `ghcr.io/ai-auto-register/cliproxyapi:<tag>`
-
-拉取最新镜像：
-
-```bash
-docker pull ghcr.io/ai-auto-register/cliproxyapi:latest
-```
-
-仓库内置的 `docker-compose.yml` 也已默认使用 GHCR 镜像；如有需要，仍可通过 `CLI_PROXY_IMAGE` 环境变量覆盖。
-
-### SQLite 存储
-
-当前仓库在未配置 Postgres、Git Store、Object Store 时，默认使用 SQLite 作为认证存储。
-
-- 默认数据库路径：`auth.db`
-- 可通过环境变量覆盖：`SQLITESTORE_PATH`
-- 首次启动时，会从配置中的 `auth-dir`，或配置文件同级的 `./auths` 导入旧的认证 JSON 文件
-- 运行时镜像认证文件会写入 `auths/`
-
-示例：
-
-```bash
-SQLITESTORE_PATH=./auth.db ./CLIProxyAPI -config ./config.yaml
-```
-
-如果使用 Docker Compose，请保留 `./auth.db` 和 `./auths` 挂载，这样 SQLite 数据库和镜像认证文件才能在容器重启后继续保留。
-
 ## 管理 API 文档
 
 请参见 [MANAGEMENT_API_CN.md](https://help.router-for.me/cn/management/api)
 
-### 401 认证清理器
-
-内置的进程内清理器会直接读取运行中的 runtime auth manager，只删除当前被判定为 401 / unauthorized 的认证文件：
-
-```bash
-./CLIProxyAPI -clean-401 -clean-401-dry-run -clean-401-once
-```
-
-- `-clean-401-dry-run`：仅预览，不实际删除
-- `-clean-401-once`：服务启动后只执行一次清理
-- `-clean-401-interval`：未设置 `-clean-401-once` 时的循环检测间隔
-
-每次实际删除前都会先把认证文件备份到 `backups/cliproxyapi-auth-cleaner/<run-id>/`，并把执行报告写入 `reports/cliproxyapi-auth-cleaner/`。
-
-也可以直接在 `config.yaml` 中启用：
-
-```yaml
-auth-cleaner:
-  enable: true
-  dry-run: false
-  once: false
-  interval-seconds: 60
-```
-
-如果同时提供 CLI 参数，则以 CLI 参数为准喵。
-
-## Amp CLI 支持
 ## 使用量统计
 
 自v6.10.0版本以后，CLIProxyAPI及 [CPAMC](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) 项目不再预置数据统计功能，如果有数据统计需求的请使用以下项目：

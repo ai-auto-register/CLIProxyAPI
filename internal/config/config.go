@@ -95,9 +95,6 @@ type Config struct {
 	// Routing controls credential selection behavior.
 	Routing RoutingConfig `yaml:"routing" json:"routing"`
 
-	// AuthCleaner controls the in-process runtime 401 auth cleaner.
-	AuthCleaner AuthCleanerConfig `yaml:"auth-cleaner" json:"auth-cleaner"`
-
 	// WebsocketAuth enables or disables authentication for the WebSocket API.
 	WebsocketAuth bool `yaml:"ws-auth" json:"ws-auth"`
 
@@ -249,18 +246,6 @@ type RoutingConfig struct {
 	// SessionAffinityTTL specifies how long session-to-auth bindings are retained.
 	// Default: 1h. Accepts duration strings like "30m", "1h", "2h30m".
 	SessionAffinityTTL string `yaml:"session-affinity-ttl,omitempty" json:"session-affinity-ttl,omitempty"`
-}
-
-// AuthCleanerConfig controls the in-process runtime auth cleaner.
-type AuthCleanerConfig struct {
-	// Enable toggles the in-process 401 auth cleaner.
-	Enable bool `yaml:"enable" json:"enable"`
-	// DryRun previews cleanup without deleting files.
-	DryRun bool `yaml:"dry-run,omitempty" json:"dry-run,omitempty"`
-	// Once runs one cleanup pass after startup instead of looping.
-	Once bool `yaml:"once,omitempty" json:"once,omitempty"`
-	// IntervalSeconds is the loop interval in seconds when Once is false.
-	IntervalSeconds int `yaml:"interval-seconds,omitempty" json:"interval-seconds,omitempty"`
 }
 
 // OAuthModelAlias defines a model ID alias for a specific channel.

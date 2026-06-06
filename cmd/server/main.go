@@ -32,7 +32,6 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/tui"
 	"github.com/router-for-me/CLIProxyAPI/v7/internal/util"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
-	"github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
 )
@@ -67,10 +66,6 @@ func main() {
 	var oauthCallbackPort int
 	var antigravityLogin bool
 	var kimiLogin bool
-	var clean401 bool
-	var clean401DryRun bool
-	var clean401Once bool
-	var clean401Interval time.Duration
 	var xaiLogin bool
 	var projectID string
 	var vertexImport string
@@ -92,10 +87,6 @@ func main() {
 	flag.IntVar(&oauthCallbackPort, "oauth-callback-port", 0, "Override OAuth callback port (defaults to provider-specific port)")
 	flag.BoolVar(&antigravityLogin, "antigravity-login", false, "Login to Antigravity using OAuth")
 	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
-	flag.BoolVar(&clean401, "clean-401", false, "Run in-process cleanup for auth files classified as 401/unauthorized")
-	flag.BoolVar(&clean401DryRun, "clean-401-dry-run", false, "Preview in-process 401 auth cleanup without deleting files")
-	flag.BoolVar(&clean401Once, "clean-401-once", false, "Run in-process 401 auth cleanup once after startup")
-	flag.DurationVar(&clean401Interval, "clean-401-interval", time.Minute, "Loop interval for in-process 401 auth cleanup")
 	flag.BoolVar(&xaiLogin, "xai-login", false, "Login to xAI using OAuth")
 	flag.StringVar(&projectID, "project_id", "", "Project ID (Gemini only, not required)")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
@@ -220,10 +211,6 @@ func main() {
 		}
 		useGitStore = false
 	}
-	if value, ok := lookupEnv("SQLITESTORE_PATH", "sqlitestore_path", "sqlite_store_path"); ok {
-		useSQLiteStore = true
-		sqliteStorePath = value
-	}
 	if value, ok := lookupEnv("GITSTORE_GIT_URL", "gitstore_git_url"); ok {
 		useGitStore = true
 		gitStoreRemoteURL = value
@@ -255,6 +242,10 @@ func main() {
 	}
 	if value, ok := lookupEnv("OBJECTSTORE_LOCAL_PATH", "objectstore_local_path"); ok {
 		objectStoreLocalPath = value
+	}
+	if value, ok := lookupEnv("SQLITESTORE_PATH", "sqlitestore_path", "sqlite_store_path"); ok {
+		useSQLiteStore = true
+		sqliteStorePath = value
 	}
 	if useSQLiteStore || (!usePostgresStore && !useObjectStore && !useGitStore) {
 		useSQLiteStore = true
@@ -358,55 +349,6 @@ func main() {
 			cfg.AuthDir = pgStoreInst.AuthDir()
 			log.Infof("postgres-backed token store enabled, workspace path: %s", pgStoreInst.WorkDir())
 		}
-	} else if useSQLiteStore {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		sqliteStoreInst, err = store.NewSQLiteStore(ctx, sqliteStorePath)
-		cancel()
-		if err != nil {
-			log.Errorf("failed to initialize sqlite token store: %v", err)
-			return
-		}
-
-		configFilePath = configPath
-		if strings.TrimSpace(configFilePath) == "" {
-			configFilePath = filepath.Join(wd, "config.yaml")
-		}
-		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
-		if err != nil {
-			log.Errorf("failed to load config: %v", err)
-			return
-		}
-		if cfg == nil {
-			cfg = &config.Config{}
-		}
-
-		var importAuthDir string
-		if strings.TrimSpace(cfg.AuthDir) != "" {
-			if filepath.IsAbs(cfg.AuthDir) {
-				importAuthDir = filepath.Clean(cfg.AuthDir)
-			} else if strings.HasPrefix(cfg.AuthDir, "~") {
-				importAuthDir = cfg.AuthDir
-			} else {
-				importAuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), cfg.AuthDir))
-			}
-		} else {
-			importAuthDir = filepath.Join(filepath.Dir(configFilePath), "auths")
-		}
-		if resolvedImportAuthDir, errResolve := util.ResolveAuthDir(importAuthDir); errResolve == nil && strings.TrimSpace(resolvedImportAuthDir) != "" {
-			importAuthDir = resolvedImportAuthDir
-		}
-
-		cfg.AuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), "auths"))
-		sqliteStoreInst.SetBaseDir(cfg.AuthDir)
-
-		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
-		if err = sqliteStoreInst.BootstrapFrom(ctx, importAuthDir); err != nil {
-			cancel()
-			log.Errorf("failed to bootstrap sqlite token store: %v", err)
-			return
-		}
-		cancel()
-		log.Infof("sqlite-backed token store enabled, database path: %s", sqliteStoreInst.DBPath())
 	} else if useObjectStore {
 		if objectStoreLocalPath == "" {
 			if writableBase != "" {
@@ -518,6 +460,55 @@ func main() {
 			cfg.AuthDir = gitStoreInst.AuthDir()
 			log.Infof("git-backed token store enabled, repository path: %s", gitStoreRoot)
 		}
+	} else if useSQLiteStore {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		sqliteStoreInst, err = store.NewSQLiteStore(ctx, sqliteStorePath)
+		cancel()
+		if err != nil {
+			log.Errorf("failed to initialize sqlite token store: %v", err)
+			return
+		}
+
+		configFilePath = configPath
+		if strings.TrimSpace(configFilePath) == "" {
+			configFilePath = filepath.Join(wd, "config.yaml")
+		}
+		cfg, err = config.LoadConfigOptional(configFilePath, isCloudDeploy)
+		if err != nil {
+			log.Errorf("failed to load config: %v", err)
+			return
+		}
+		if cfg == nil {
+			cfg = &config.Config{}
+		}
+
+		var importAuthDir string
+		if strings.TrimSpace(cfg.AuthDir) != "" {
+			if filepath.IsAbs(cfg.AuthDir) {
+				importAuthDir = filepath.Clean(cfg.AuthDir)
+			} else if strings.HasPrefix(cfg.AuthDir, "~") {
+				importAuthDir = cfg.AuthDir
+			} else {
+				importAuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), cfg.AuthDir))
+			}
+		} else {
+			importAuthDir = filepath.Join(filepath.Dir(configFilePath), "auths")
+		}
+		if resolvedImportAuthDir, errResolve := util.ResolveAuthDir(importAuthDir); errResolve == nil && strings.TrimSpace(resolvedImportAuthDir) != "" {
+			importAuthDir = resolvedImportAuthDir
+		}
+
+		cfg.AuthDir = filepath.Clean(filepath.Join(filepath.Dir(configFilePath), "auths"))
+		sqliteStoreInst.SetBaseDir(cfg.AuthDir)
+
+		ctx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		if err = sqliteStoreInst.BootstrapFrom(ctx, importAuthDir); err != nil {
+			cancel()
+			log.Errorf("failed to bootstrap sqlite token store: %v", err)
+			return
+		}
+		cancel()
+		log.Infof("sqlite-backed token store enabled, database path: %s", sqliteStoreInst.DBPath())
 	} else if configPath != "" {
 		configFilePath = configPath
 		cfg, err = config.LoadConfigOptional(configPath, isCloudDeploy)
@@ -608,32 +599,6 @@ func main() {
 
 	// Handle different command modes based on the provided flags.
 
-	authCleanerRuntime := (*cliproxy.AuthCleanerRuntime)(nil)
-	if cfg.AuthCleaner.Enable || clean401 {
-		interval := time.Duration(cfg.AuthCleaner.IntervalSeconds) * time.Second
-		if interval <= 0 {
-			interval = time.Minute
-		}
-		authCleanerRuntime = &cliproxy.AuthCleanerRuntime{
-			Enabled:  true,
-			DryRun:   cfg.AuthCleaner.DryRun,
-			Once:     cfg.AuthCleaner.Once,
-			Interval: interval,
-		}
-		if clean401 {
-			authCleanerRuntime.Enabled = true
-		}
-		if clean401DryRun {
-			authCleanerRuntime.DryRun = true
-		}
-		if clean401Once {
-			authCleanerRuntime.Once = true
-		}
-		if clean401Interval > 0 {
-			authCleanerRuntime.Interval = clean401Interval
-		}
-	}
-
 	if vertexImport != "" {
 		// Handle Vertex service account import
 		cmd.DoVertexImport(cfg, vertexImport, vertexImportPrefix)
@@ -705,7 +670,7 @@ func main() {
 					password = localMgmtPassword
 				}
 
-				cancel, done := cmd.StartServiceBackgroundWithOptions(cfg, configFilePath, password, authCleanerRuntime)
+				cancel, done := cmd.StartServiceBackground(cfg, configFilePath, password)
 
 				client := tui.NewClient(cfg.Port, password)
 				ready := false
@@ -754,7 +719,7 @@ func main() {
 			} else if cfg.Home.Enabled {
 				log.Info("Home mode: remote model updates disabled")
 			}
-			cmd.StartServiceWithOptions(cfg, configFilePath, password, authCleanerRuntime)
+			cmd.StartService(cfg, configFilePath, password)
 		}
 	}
 }

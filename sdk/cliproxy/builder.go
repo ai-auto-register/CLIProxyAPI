@@ -49,9 +49,6 @@ type Builder struct {
 
 	// serverOptions contains additional server configuration options.
 	serverOptions []api.ServerOption
-
-	// authCleaner configures an optional in-process auth cleanup loop.
-	authCleaner *AuthCleanerRuntime
 }
 
 // Hooks allows callers to plug into service lifecycle stages.
@@ -145,12 +142,6 @@ func (b *Builder) WithCoreAuthManager(mgr *coreauth.Manager) *Builder {
 // WithServerOptions appends server configuration options used during construction.
 func (b *Builder) WithServerOptions(opts ...api.ServerOption) *Builder {
 	b.serverOptions = append(b.serverOptions, opts...)
-	return b
-}
-
-// WithAuthCleaner configures an in-process auth cleaner that operates on runtime coreManager state.
-func (b *Builder) WithAuthCleaner(runtime *AuthCleanerRuntime) *Builder {
-	b.authCleaner = runtime
 	return b
 }
 
@@ -264,7 +255,6 @@ func (b *Builder) Build() (*Service, error) {
 		accessManager:  accessManager,
 		coreManager:    coreManager,
 		serverOptions:  append([]api.ServerOption(nil), b.serverOptions...),
-		authCleaner:    b.authCleaner,
 	}
 	return service, nil
 }

@@ -68,78 +68,10 @@ VisionCoder is also offering our users a limited-time <a href="https://coder.vis
 
 CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
 
-### Changes in This Repository
-
-- Removed sponsor/promotional content from the README files
-- Updated GitHub Actions to publish container images to GHCR instead of Docker Hub
-- Changed the default image in `docker-compose.yml` to `ghcr.io/ai-auto-register/cliproxyapi:latest`
-- Changed SQLite defaults to use the project root (`auth.db` and `auths/`)
-- Added SQLite storage usage notes and Docker Compose persistence
-- Added GHCR image usage notes to the README files
-
-### Container Image
-
-Official container images are published to GHCR:
-
-- `ghcr.io/ai-auto-register/cliproxyapi:latest`
-- `ghcr.io/ai-auto-register/cliproxyapi:<tag>`
-
-Pull the latest image:
-
-```bash
-docker pull ghcr.io/ai-auto-register/cliproxyapi:latest
-```
-
-The included `docker-compose.yml` now uses the GHCR image by default. You can still override it with the `CLI_PROXY_IMAGE` environment variable when needed.
-
-### SQLite Storage
-
-This repository now uses SQLite as the default auth store when Postgres, Git store, and object store are not configured.
-
-- Default database path: `auth.db`
-- Optional override: `SQLITESTORE_PATH`
-- On first startup, legacy auth JSON files are imported from `auth-dir` in the config, or from `./auths` next to the config file
-- Runtime auth mirror files are written to `auths/`
-
-Example:
-
-```bash
-SQLITESTORE_PATH=./auth.db ./CLIProxyAPI -config ./config.yaml
-```
-
-When using Docker Compose, keep `./auth.db` and `./auths` mounted so that the SQLite database and mirrored auth files persist across container restarts.
-
 ## Management API
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
 
-### 401 Auth Cleaner
-
-You can run the built-in in-process cleaner to remove only auth files that are currently classified as 401 / unauthorized by the runtime auth manager:
-
-```bash
-./CLIProxyAPI -clean-401 -clean-401-dry-run -clean-401-once
-```
-
-- `-clean-401-dry-run`: preview only, no deletion
-- `-clean-401-once`: run once after startup and keep serving normally
-- `-clean-401-interval`: loop interval when `-clean-401-once` is not set
-
-The cleaner will back up each deleted auth JSON into `backups/cliproxyapi-auth-cleaner/<run-id>/` and write a report to `reports/cliproxyapi-auth-cleaner/`.
-
-You can also enable it from `config.yaml`:
-
-```yaml
-auth-cleaner:
-  enable: true
-  dry-run: false
-  once: false
-  interval-seconds: 60
-```
-
-CLI flags still override the config values when provided.
-
-## Amp CLI Support
 ## Usage Statistics
 
 Since v6.10.0, CLIProxyAPI and [CPAMC](https://github.com/router-for-me/Cli-Proxy-API-Management-Center) no longer ship built-in usage statistics. If you need usage statistics, use:
