@@ -17,8 +17,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
-	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	sdkAuth "github.com/router-for-me/CLIProxyAPI/v7/sdk/auth"
+	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v7/sdk/cliproxy/auth"
 	_ "modernc.org/sqlite"
 )
 
