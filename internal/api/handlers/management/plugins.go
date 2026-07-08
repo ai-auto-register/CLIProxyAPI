@@ -2,8 +2,10 @@ package management
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +32,7 @@ type pluginListEntry struct {
 	Enabled          bool                    `json:"enabled"`
 	EffectiveEnabled bool                    `json:"effective_enabled"`
 	SupportsOAuth    bool                    `json:"supports_oauth"`
+	OAuthProvider    string                  `json:"oauth_provider"`
 	Logo             string                  `json:"logo"`
 	ConfigFields     []pluginConfigFieldInfo `json:"config_fields"`
 	Menus            []pluginMenuInfo        `json:"menus"`
@@ -79,7 +82,7 @@ func (h *Handler) ListPlugins(c *gin.Context) {
 	h.mu.Unlock()
 
 	entries := make(map[string]pluginListEntry)
-	files, errDiscover := pluginhost.DiscoverPluginFiles(pluginsDir)
+	files, errDiscover := pluginhost.DiscoverPluginFiles(pluginsDir, pluginStoreDesiredVersions(configs))
 	if errDiscover != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "plugin_discovery_failed", "message": errDiscover.Error()})
 		return
@@ -88,7 +91,7 @@ func (h *Handler) ListPlugins(c *gin.Context) {
 		entries[file.ID] = pluginListEntry{
 			ID:           htmlsanitize.String(file.ID),
 			Path:         htmlsanitize.String(file.Path),
-			Enabled:      true,
+			Enabled:      false,
 			ConfigFields: []pluginConfigFieldInfo{},
 			Menus:        []pluginMenuInfo{},
 		}
@@ -112,14 +115,11 @@ func (h *Handler) ListPlugins(c *gin.Context) {
 			entry.ID = htmlsanitize.String(info.ID)
 			entry.Registered = true
 			entry.SupportsOAuth = info.SupportsOAuth
+			entry.OAuthProvider = htmlsanitize.String(info.OAuthProvider)
 			entry.Logo = htmlsanitize.String(info.Metadata.Logo)
 			entry.ConfigFields = pluginConfigFields(info.Metadata.ConfigFields)
 			entry.Menus = pluginMenus(info.Menus)
 			entry.Metadata = pluginMetadata(info.Metadata)
-			_, configured := configs[info.ID]
-			if !configured && !entry.Enabled {
-				entry.Enabled = true
-			}
 			entries[info.ID] = entry
 		}
 	}
@@ -213,18 +213,25 @@ func (h *Handler) PatchPluginEnabled(c *gin.Context) {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	ensurePluginConfigMap(h.cfg)
 	item := h.cfg.Plugins.Configs[id]
 	node := pluginConfigNode(item)
 	setYAMLMappingValue(node, "enabled", boolYAMLNode(*body.Enabled))
 	updated, errConfig := pluginInstanceConfigFromNode(node)
 	if errConfig != nil {
+		h.mu.Unlock()
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_config", "message": errConfig.Error()})
 		return
 	}
 	h.cfg.Plugins.Configs[id] = updated
-	h.persistLocked(c)
+	cfgSnapshot, okSnapshot := h.saveConfigAndSnapshotLocked(c)
+	h.mu.Unlock()
+	if !okSnapshot {
+		return
+	}
+
+	h.reloadConfigAfterManagementSaveAsync(c.Request.Context(), cfgSnapshot)
+	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
 // PutPluginConfig replaces plugins.configs.<id> with the request object.
@@ -297,6 +304,91 @@ func (h *Handler) PatchPluginConfig(c *gin.Context) {
 	h.persistLocked(c)
 }
 
+// DeletePlugin removes the selected local plugin file and its saved config.
+func (h *Handler) DeletePlugin(c *gin.Context) {
+	id, okID := pluginIDFromRequest(c)
+	if !okID {
+		return
+	}
+	if h == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "plugin_not_found", "message": "plugin not found"})
+		return
+	}
+
+	h.mu.Lock()
+	if h.cfg == nil {
+		h.mu.Unlock()
+		c.JSON(http.StatusNotFound, gin.H{"error": "plugin_not_found", "message": "plugin not found"})
+		return
+	}
+	pluginsDir := normalizedPluginsDir(h.cfg.Plugins.Dir)
+	item, configured := h.cfg.Plugins.Configs[id]
+	host := h.pluginHost
+	h.mu.Unlock()
+
+	var desiredVersions map[string]string
+	if configured {
+		desiredVersions = pluginStoreDesiredVersions(map[string]config.PluginInstanceConfig{id: item})
+	}
+	path, errPath := pluginFilePath(pluginsDir, id, desiredVersions)
+	if errPath != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "plugin_discovery_failed", "message": errPath.Error()})
+		return
+	}
+	if path == "" && !configured {
+		c.JSON(http.StatusNotFound, gin.H{"error": "plugin_not_found", "message": "plugin not found"})
+		return
+	}
+
+	if pluginBusy(host, id) && (host == nil || !host.UnloadPlugin(id)) && pluginBusy(host, id) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":            "plugin_delete_requires_restart",
+			"message":          "loaded plugin cannot be deleted while the server is running",
+			"restart_required": true,
+		})
+		return
+	}
+
+	fileDeleted := false
+	if path != "" {
+		if errRemove := os.Remove(path); errRemove != nil {
+			if !errors.Is(errRemove, os.ErrNotExist) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "plugin_delete_failed", "message": errRemove.Error()})
+				return
+			}
+		} else {
+			fileDeleted = true
+		}
+	}
+
+	h.mu.Lock()
+	delete(h.cfg.Plugins.Configs, id)
+	if configured {
+		if errSave := config.SaveConfigPreserveComments(h.configFilePath, h.cfg); errSave != nil {
+			h.mu.Unlock()
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":        "config_save_failed",
+				"message":      fmt.Sprintf("plugin deleted but saving config failed: %s", errSave.Error()),
+				"file_deleted": fileDeleted,
+				"path":         path,
+			})
+			return
+		}
+	}
+	cfgSnapshot := h.reloadSnapshotConfigLocked()
+	h.mu.Unlock()
+
+	h.reloadConfigAfterManagementSaveAsync(c.Request.Context(), cfgSnapshot)
+	c.JSON(http.StatusOK, gin.H{
+		"status":             "deleted",
+		"id":                 htmlsanitize.String(id),
+		"path":               htmlsanitize.String(path),
+		"file_deleted":       fileDeleted,
+		"configured_removed": configured,
+		"restart_required":   false,
+	})
+}
+
 func normalizedPluginsDir(dir string) string {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
@@ -307,7 +399,7 @@ func normalizedPluginsDir(dir string) string {
 
 func pluginInstanceEnabled(item config.PluginInstanceConfig) bool {
 	if item.Enabled == nil {
-		return true
+		return false
 	}
 	return *item.Enabled
 }
@@ -335,6 +427,19 @@ func pluginDiscovered(pluginsDir string, id string) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func pluginFilePath(pluginsDir string, id string, desiredVersions ...map[string]string) (string, error) {
+	files, errDiscover := pluginhost.DiscoverPluginFiles(pluginsDir, desiredVersions...)
+	if errDiscover != nil {
+		return "", errDiscover
+	}
+	for _, file := range files {
+		if file.ID == id {
+			return file.Path, nil
+		}
+	}
+	return "", nil
 }
 
 func pluginConfigFields(fields []pluginapi.ConfigField) []pluginConfigFieldInfo {

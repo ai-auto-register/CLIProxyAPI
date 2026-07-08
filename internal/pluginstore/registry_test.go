@@ -83,6 +83,127 @@ func TestValidateRegistryAllowsMissingVersion(t *testing.T) {
 	}
 }
 
+func TestParseRegistrySupportsDirectInstall(t *testing.T) {
+	t.Parallel()
+
+	registry, errParse := ParseRegistry([]byte(`{
+		"schema_version": 2,
+		"plugins": [{
+			"id": "sample-provider",
+			"name": "Sample Provider",
+			"description": "Adds sample provider support.",
+			"author": "author-name",
+			"version": "0.2.0",
+			"auth_required": true,
+			"install": {
+				"type": "direct",
+				"artifacts": [{
+					"goos": "windows",
+					"goarch": "x64",
+					"url": "https://downloads.example/sample-provider.zip",
+					"sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+				}]
+			},
+			"versions": [{
+				"version": "0.1.0",
+				"install": {
+					"type": "direct",
+					"artifacts": [{
+						"goos": "linux",
+						"goarch": "aarch64",
+						"url": "https://downloads.example/sample-provider-0.1.0.zip",
+						"sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+					}]
+				}
+			}]
+		}]
+	}`))
+	if errParse != nil {
+		t.Fatalf("ParseRegistry() error = %v", errParse)
+	}
+	plugin, ok := registry.PluginByID("sample-provider")
+	if !ok {
+		t.Fatal("PluginByID(sample-provider) missing")
+	}
+	if PluginInstallType(plugin) != InstallTypeDirect {
+		t.Fatalf("install type = %q, want direct", PluginInstallType(plugin))
+	}
+	if !plugin.AuthRequired {
+		t.Fatal("AuthRequired = false, want true")
+	}
+	if len(plugin.Versions) != 1 || plugin.Versions[0].Version != "0.1.0" {
+		t.Fatalf("versions = %#v, want normalized 0.1.0 entry", plugin.Versions)
+	}
+	platforms := PluginPlatforms(plugin)
+	if len(platforms) != 2 ||
+		platforms[0].GOOS != "windows" || platforms[0].GOARCH != "amd64" ||
+		platforms[1].GOOS != "linux" || platforms[1].GOARCH != "arm64" {
+		t.Fatalf("platforms = %#v, want normalized windows/amd64 and linux/arm64", platforms)
+	}
+	artifacts := PluginArtifacts(plugin)
+	if len(artifacts) != 2 ||
+		artifacts[0].GOOS != "windows" || artifacts[0].GOARCH != "amd64" ||
+		artifacts[1].GOOS != "linux" || artifacts[1].GOARCH != "arm64" {
+		t.Fatalf("artifacts = %#v, want normalized top-level and version artifacts", artifacts)
+	}
+}
+
+func TestValidateRegistryRejectsInvalidDirectInstall(t *testing.T) {
+	t.Parallel()
+
+	registry := Registry{SchemaVersion: SchemaVersionV2, Plugins: []Plugin{{
+		ID:          "sample-provider",
+		Name:        "Sample Provider",
+		Description: "Adds sample provider support.",
+		Author:      "author-name",
+		Version:     "0.2.0",
+		Install: InstallPlan{
+			Type: InstallTypeDirect,
+			Artifacts: []Artifact{{
+				GOOS:   "linux",
+				GOARCH: "amd64",
+				URL:    "https://downloads.example/sample.zip?token=secret",
+				SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			}},
+		},
+	}}}
+	errValidate := ValidateRegistry(registry)
+	if errValidate == nil {
+		t.Fatal("ValidateRegistry() error = nil")
+	}
+	if !strings.Contains(errValidate.Error(), "sensitive query") {
+		t.Fatalf("ValidateRegistry() error = %v, want sensitive query", errValidate)
+	}
+}
+
+func TestValidateRegistryRejectsDirectInstallInSchemaV1(t *testing.T) {
+	t.Parallel()
+
+	registry := Registry{SchemaVersion: SchemaVersion, Plugins: []Plugin{{
+		ID:          "sample-provider",
+		Name:        "Sample Provider",
+		Description: "Adds sample provider support.",
+		Author:      "author-name",
+		Version:     "0.2.0",
+		Install: InstallPlan{
+			Type: InstallTypeDirect,
+			Artifacts: []Artifact{{
+				GOOS:   "linux",
+				GOARCH: "amd64",
+				URL:    "https://downloads.example/sample.zip",
+				SHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+			}},
+		},
+	}}}
+	errValidate := ValidateRegistry(registry)
+	if errValidate == nil {
+		t.Fatal("ValidateRegistry() error = nil")
+	}
+	if !strings.Contains(errValidate.Error(), "schema_version 2") {
+		t.Fatalf("ValidateRegistry() error = %v, want schema_version 2", errValidate)
+	}
+}
+
 func TestValidateRegistryRejectsInvalidEntries(t *testing.T) {
 	t.Parallel()
 
@@ -102,7 +223,7 @@ func TestValidateRegistryRejectsInvalidEntries(t *testing.T) {
 		{
 			name: "schema version",
 			mutate: func(registry *Registry) {
-				registry.SchemaVersion = 2
+				registry.SchemaVersion = 3
 			},
 			wantErr: "unsupported schema_version",
 		},
@@ -157,6 +278,42 @@ func TestValidateRegistryRejectsInvalidEntries(t *testing.T) {
 				t.Fatalf("ValidateRegistry() error = %v, want substring %q", errValidate, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestNormalizeSourcesAppendsURLsToDefaultSource(t *testing.T) {
+	t.Parallel()
+
+	sources, errNormalize := NormalizeSources([]string{" https://community.example/registry.json "})
+	if errNormalize != nil {
+		t.Fatalf("NormalizeSources() error = %v", errNormalize)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources len = %d, want 2", len(sources))
+	}
+	if sources[0].ID != DefaultSourceID || sources[0].URL != DefaultRegistryURL {
+		t.Fatalf("default source = %#v", sources[0])
+	}
+	if sources[1].ID != SourceID("https://community.example/registry.json") ||
+		sources[1].Name != "community.example" ||
+		sources[1].URL != "https://community.example/registry.json" {
+		t.Fatalf("third-party source = %#v", sources[1])
+	}
+}
+
+func TestNormalizeSourcesSkipsDuplicates(t *testing.T) {
+	t.Parallel()
+
+	sources, errNormalize := NormalizeSources([]string{
+		DefaultRegistryURL,
+		"https://community.example/registry.json",
+		"https://community.example/registry.json",
+	})
+	if errNormalize != nil {
+		t.Fatalf("NormalizeSources() error = %v", errNormalize)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("sources len = %d, want 2: %#v", len(sources), sources)
 	}
 }
 
